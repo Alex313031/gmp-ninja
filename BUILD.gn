@@ -7,6 +7,34 @@ group("gmp_all") {
   ]
 }
 
+config("gmp_nt5") {
+  defines = [
+    "WINDOWS",
+    "_WINDOWS",
+    "_UNICODE",
+    "UNICODE",
+    "WINVER=0x0500",
+    "_WINVER=0x0500",
+    "_WIN32_WINNT=0x0500",
+    "_WIN64_WINNT=0x0502",
+    "_WIN32_IE=0x0501",
+    "_USING_V110_SDK71_",
+    "_ATL_XP_TARGETING",
+    "PSAPI_VERSION=1",
+  ]
+  ldflags = [ "/SUBSYSTEM:WINDOWS,5.00" ]
+}
+
+# GNU Multi-Precision C/C++ Library
+source_set("gmp_headers") {
+  configs += [ ":gmp_nt5" ]
+
+  sources = [
+    "gmp.h",
+    "gmpxx.h",
+  ]
+}
+
 config("gmp_config") {
   defines = [
     "_CRT_NONSTDC_NO_DEPRECATE",
@@ -112,9 +140,11 @@ static_library("gmp") {
   defines = [ "_LIB" ]
   configs += [ ":gmp_config" ]
   sources = [
-    "gmp/fib_table.c",
-    "gmp/mpn_sec_ops.c",
-    "gmp/mp_bases.c",
+    "missing/fib_table.c",
+    "missing/mp_bases.c",
+    "missing/mpn_sec_ops.c",
+  ]
+  sources += [
     "gmp/assert.c",
     "gmp/compat.c",
     "gmp/errno.c",
