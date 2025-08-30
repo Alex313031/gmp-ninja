@@ -1,10 +1,28 @@
 group("gmp_all") {
   deps = [
+    ":gmp_headers",
+    ":gmp_static",
+    ":gmp_shared",
+    ":gmp_test",
+  ]
+}
+
+group("gmp_static") {
+  deps = [
     ":gmp",
     ":gmpxx",
-    ":libgmp",
-    ":libgmpxx"
   ]
+}
+
+group("gmp_shared") {
+  deps = [
+    ":libgmp",
+    ":libgmpxx",
+  ]
+}
+
+group("gmp_test") {
+  deps = [ ":gmp_tests" ]
 }
 
 config("gmp_nt5") {
@@ -25,16 +43,6 @@ config("gmp_nt5") {
   ldflags = [ "/SUBSYSTEM:WINDOWS,5.00" ]
 }
 
-# GNU Multi-Precision C/C++ Library
-source_set("gmp_headers") {
-  configs += [ ":gmp_nt5" ]
-
-  sources = [
-    "gmp.h",
-    "gmpxx.h",
-  ]
-}
-
 config("gmp_config") {
   defines = [
     "_CRT_NONSTDC_NO_DEPRECATE",
@@ -51,7 +59,17 @@ config("gmp_config") {
     "/ignore:4146",
     "/ignore:4244",
     "/ignore:4267",
-    "/ignore:4334"
+    "/ignore:4334",
+  ]
+}
+
+# GNU Multi-Precision C/C++ Library
+source_set("gmp_headers") {
+  configs += [ ":gmp_nt5" ]
+
+  sources = [
+    "gmp.h",
+    "gmpxx.h",
   ]
 }
 
@@ -709,5 +727,109 @@ source_set("scanf") {
     "gmp/scanf/vfscanf.c",
     "gmp/scanf/vscanf.c",
     "gmp/scanf/vsscanf.c"
+  ]
+}
+
+executable("gmp_tests") {
+  configs += [ ":gmp_test_config" ]
+  defines = [ "__GMP_WITHIN_GMPXX" ]
+  sources = [
+    "missing/tests/config.h",
+    "missing/tests/cxx-tests.h",
+    "missing/tests/gmp-test.cc",
+  ]
+  sources += [ "gmp/tests/spinner.c", ]
+  deps = [
+    ":gmp_tests_sources_shared",
+  ]
+}
+
+static_library("gmp_tests_sources_static") {
+  configs += [ ":gmp_test_config" ]
+  defines = [ "_LIB" ]
+  sources = [
+    "gmp/tests/devel/primes.c",
+    "gmp/tests/memory.c",
+    "gmp/tests/misc.c",
+    "gmp/tests/refmpf.c",
+    "gmp/tests/refmpn.c",
+    "gmp/tests/refmpq.c",
+    "gmp/tests/refmpz.c",
+    "gmp/tests/trace.c",
+  ]
+  deps = [
+    ":add_ssaaaa",
+    ":sub_ddmmss",
+  ]
+}
+
+shared_library("gmp_tests_sources_shared") {
+  configs += [ ":gmp_test_config" ]
+  defines = [ "__GMP_LIBGMP_DLL" ]
+  sources = [
+    "gmp/tests/devel/primes.c",
+    "gmp/tests/memory.c",
+    "gmp/tests/misc.c",
+    "gmp/tests/refmpf.c",
+    "gmp/tests/refmpn.c",
+    "gmp/tests/refmpq.c",
+    "gmp/tests/refmpz.c",
+    "gmp/tests/trace.c",
+  ]
+  deps = [
+    ":add_ssaaaa",
+    ":sub_ddmmss",
+  ]
+}
+
+source_set("add_ssaaaa") {
+  configs += [ ":gmp_test_config" ]
+  defines = [ "main=devel_test_add_ssaaaa_main", ]
+  sources = [
+    "gmp/tests/devel/test-add_ssaaaa.c",
+  ]
+}
+
+source_set("sub_ddmmss") {
+  configs += [ ":gmp_test_config" ]
+  defines = [ "main=devel_test_sub_ddmmss_main", ]
+  sources = [
+    "gmp/tests/devel/test-sub_ddmmss.c",
+  ]
+}
+
+config("gmp_test_config") {
+  defines = [
+    "_CRT_NONSTDC_NO_DEPRECATE",
+    "_CRT_SECURE_NO_WARNINGS",
+    "__GMP_WITHIN_GMP",
+    "WANT_WINSOCK2",
+  ]
+  include_dirs = [
+    "gmp",
+    "gmp/tests",
+    "missing",
+  ]
+  cflags_c = [ "-Wno-implicit-function-declaration" ]
+  cflags = [
+    "-Wno-constant-conversion",
+    "-Wno-tautological-constant-out-of-range-compare",
+    "-Wno-return-type",
+    "-Wno-visibility",
+    "-Wno-format",
+    "/wd4018",
+    "/wd4146",
+    "/wd4244",
+    "/wd4267",
+    "/wd4716",
+    "/wd4477",
+  ]
+  ldflags = [
+    "/ignore:4018",
+    "/ignore:4146",
+    "/ignore:4244",
+    "/ignore:4267",
+    "/ignore:4716",
+    "/ignore:4477",
   ]
 }
