@@ -3,7 +3,6 @@ group("gmp_all") {
     ":gmp_headers",
     ":gmp_static",
     ":gmp_shared",
-    ":gmp_test",
   ]
 }
 
@@ -22,6 +21,7 @@ group("gmp_shared") {
 }
 
 group("gmp_test") {
+  testonly = true
   deps = [ ":gmp_tests" ]
 }
 
@@ -55,6 +55,7 @@ config("gmp_config") {
   #cflags_c = [ "-Wno-implicit-function-declaration" ]
   ldflags = [
     "/ignore:4018",
+    "/ignore:4099",
     "/ignore:4101",
     "/ignore:4146",
     "/ignore:4244",
@@ -734,7 +735,6 @@ executable("gmp_tests") {
   configs += [ ":gmp_test_config" ]
   defines = [ "__GMP_WITHIN_GMPXX" ]
   sources = [
-    "missing/tests/config.h",
     "missing/tests/cxx-tests.h",
     "missing/tests/gmp-test.cc",
   ]
@@ -833,3 +833,5 @@ config("gmp_test_config") {
     "/ignore:4477",
   ]
 }
+
+assert(current_cpu != "arm64", "GMP only supported on x86 and x64!")
