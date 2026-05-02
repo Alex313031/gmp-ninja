@@ -1,0 +1,29 @@
+# Pi-via-Chudnovsky implementation as a tiny static lib, compiled once
+# and linked into all four testapp executables (linux/win x static/shared).
+#
+# The lib doesn't link against libgmp itself -- the executable does that.
+# Each .o here just carries unresolved __gmpf_* references that the
+# executable's link step satisfies via libgmp_static.a or libgmp.dll
+# (whichever variant the executable picked).
+
+config("pi_chudnovsky_public") {
+  include_dirs = [
+    "//src/gmp-ninja",          # gmp.h, gmpxx.h
+    "//src/gmp-ninja/testapp",  # for `#include "pi/pi_chudnovsky.h"`
+  ]
+}
+
+static_library("pi_chudnovsky") {
+  if (is_win) {
+    configs += [
+      "//build/config/win:console_subsystem",
+      "//build/config/win:console_unicode",
+    ]
+  }
+  sources = [
+    "pi_chudnovsky.cc",
+    "pi_chudnovsky.h",
+  ]
+  configs += [ ":pi_chudnovsky_public" ]
+  public_configs = [ ":pi_chudnovsky_public" ]
+}

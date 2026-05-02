@@ -1,0 +1,412 @@
+import("asm.gni")
+import("gmp_sources.gni")  # auto-generated; see tools/extract_source_lists.py
+
+group("gmp_all") {
+  deps = [
+    ":gmp_headers",
+    ":gmp_static",
+    ":gmp_shared",
+  ]
+  if (gmp_asm_enabled) {
+    deps += [ ":gmp_asm" ]
+  }
+}
+
+group("gmp_static") {
+  deps = [
+    ":libgmp_static",
+    ":libgmpxx_static",
+  ]
+}
+
+group("gmp_shared") {
+  deps = [
+    ":libgmp",
+    ":libgmpxx",
+  ]
+}
+
+group("gmp_test") {
+  testonly = true
+  # NOTE: ":gmp_tests" (and friends -- gmp_tests_sources_*, add_ssaaaa,
+  # sub_ddmmss) are empty scaffolding placeholders.  Adding them here
+  # builds them as Windows executables with no main(), which the linker
+  # rejects with "undefined reference to WinMain@16".  Re-enable when
+  # someone fills in their `sources = []` lists from gmp/tests/.
+  deps = [ "testapp:gmp_testapps" ]
+}
+
+config("gmp_config") {
+  defines = [
+    "_CRT_NONSTDC_NO_DEPRECATE",
+    "__GMP_WITHIN_GMP",
+  ]
+  include_dirs = [
+    "missing",
+    "gmp",
+  ]
+  # The generated tables (fac_table.h, fib_table.h, mp_bases.h, perfsqr.h,
+  # sieve_table.h, trialdivtab.h) hard-code GMP_LIMB_BITS in an upstream
+  # compile-time sentinel ("Error, error, this data is for <N> bit limb").
+  # Pick the matching set per target ABI: missing/x86/ for i686
+  # (LIMB_BITS=32), missing/x64/ for x86_64 (LIMB_BITS=64).  jacobitab.h
+  # is ABI-independent and lives directly in missing/.
+  if (current_cpu == "x86") {
+    include_dirs += [
+      "missing/x86",
+    ]
+  } else {
+    include_dirs += [
+      "missing/x64",
+    ]
+  }
+  cflags = [ "-Wno-error", ]
+  ldflags = []
+}
+
+# GNU Multi-Precision C/C++ Library
+source_set("gmp_headers") {
+  sources = [
+    "gmp.h",
+    "gmpxx.h",
+  ]
+}
+
+# Sources that go directly into libgmp -- gmp_toplevel_sources comes from
+# the auto-generated gmp_sources.gni (mirrors libgmp_la_SOURCES from
+# Makefile.am); we add the ABI-specific generated tables and the
+# OPERATION-multiplexed stub from missing/.
+if (current_cpu == "x86") {
+  _gmp_tables_dir = "missing/x86"
+} else {
+  _gmp_tables_dir = "missing/x64"
+}
+
+gmp_core_sources = gmp_toplevel_sources + [
+  "$_gmp_tables_dir/fib_table.c",
+  "$_gmp_tables_dir/mp_bases.c",
+  "missing/mpn_sec_ops.c",
+]
+
+# Static lib gets the full generic-C mpn (self-contained, asm-free).
+# Shared lib swaps in mpn_no_asm_overlap (full list minus the .c files
+# whose function an asm impl provides) when asm is enabled, then links
+# libgmp_asm.a -- otherwise it falls back to mpn (the full set).
+gmp_module_deps_static = [
+  ":rand",
+  ":mpf",
+  ":mpn",
+  ":mpq",
+  ":mpz",
+  ":printf",
+  ":scanf",
+]
+if (gmp_asm_enabled) {
+  gmp_module_deps = [
+    ":rand",
+    ":mpf",
+    ":mpn_no_asm_overlap",
+    ":mpq",
+    ":mpz",
+    ":printf",
+    ":scanf",
+  ]
+} else {
+  gmp_module_deps = gmp_module_deps_static
+}
+
+shared_library("libgmpxx") {
+  defines = [
+    "__GMP_LIBGMP_DLL",
+    "__GMP_WITHIN_GMPXX",
+  ]
+  configs += [ ":gmp_config" ]
+  # Force MinGW ld to auto-export every global, even when some carry an
+  # explicit __declspec(dllexport).  Without this the linker silently
+  # drops everything-but-the-explicitly-marked, leaving source_set
+  # symbols (mpf_*, mpz_*, mpn_*) out of libgmp.dll's export table.
+  ldflags = [ "-Wl,--export-all-symbols" ]
+  sources = gmpxx_core_sources
+  public_deps = [ ":libgmp" ]
+}
+
+static_library("libgmpxx_static") {
+  defines = [
+    "_LIB",
+    "__GMP_WITHIN_GMPXX",
+  ]
+  configs += [ ":gmp_config" ]
+  sources = gmpxx_core_sources
+  public_deps = [ ":libgmp_static" ]
+}
+
+shared_library("libgmp") {
+  defines = [ "__GMP_LIBGMP_DLL" ]
+  configs += [ ":gmp_config" ]
+  # See the note on libgmpxx -- without --export-all-symbols, MinGW only
+  # exports symbols that carry explicit __declspec(dllexport), which our
+  # source_sets (mpn/mpz/mpf/etc.) don't compile with.
+  ldflags = [ "-Wl,--export-all-symbols" ]
+  sources = gmp_core_sources
+  public_deps = gmp_module_deps
+  if (gmp_asm_enabled) {
+    # Pull libgmp_asm.a into the link.  The asm objects override the
+    # generic-C versions of the same functions (which are dropped from
+    # the mpn source_set below to avoid duplicate-symbol errors).
+    #
+    # Two non-obvious things going on here:
+    #
+    # 1. We pass the archive via ldflags, not libs, because GN's {{libs}}
+    #    expansion prepends `-l` to any entry without a `/` -- and when
+    #    root_out_dir == root_build_dir (the common case), rebase_path
+    #    returns just `libgmp_asm.a`, which GN then mangles to
+    #    `-llibgmp_asm.a` and the linker errors with "cannot find
+    #    -llibgmp_asm.a".  ldflags entries go verbatim.
+    #
+    # 2. ldflags lands BEFORE the input .o files on the link line.  ar
+    #    archives use lazy resolution -- a .o member is pulled in only if
+    #    a previously-seen .o has an unresolved reference to one of its
+    #    symbols.  At the position ldflags sits, no input .o has been seen
+    #    yet, so the linker would discard libgmp_asm.a entirely and the
+    #    mpz/mpq/mpf .o's coming after would fail with undefined refs to
+    #    __gmpn_mul_1 etc.  --whole-archive forces every member in
+    #    regardless of order; --no-whole-archive restores normal behavior
+    #    for any later .a's on the line.  Safe because drop_c already
+    #    removed the C duplicates -- every asm member IS wanted.
+    deps = [ ":gmp_asm" ]
+    ldflags += [
+      "-Wl,--whole-archive",
+      rebase_path(gmp_asm_archive, root_build_dir),
+      "-Wl,--no-whole-archive",
+    ]
+  }
+}
+
+# libgmp_static.a is built pure-C even when the asm pipeline is on, so the
+# .a is self-contained and links cleanly on any host without needing m4 or
+# the assembler at consumer link time.  Consumers who want asm acceleration
+# should either:
+#   - link against the shared libgmp.dll, or
+#   - link libgmp_static_with_asm.a (defined below) + libgmp_asm.a, or
+#   - link libgmp_static.a + libgmp_asm.a directly (note: this gets you
+#     duplicate-symbol errors for the C and asm impls of the same fn --
+#     the `_with_asm` variant exists specifically to avoid that).
+static_library("libgmp_static") {
+  defines = [ "_LIB" ]
+  configs += [ ":gmp_config" ]
+  sources = gmp_core_sources
+  public_deps = gmp_module_deps_static
+}
+
+# libgmp_static_with_asm.a + libgmpxx_static_with_asm.a: same as
+# libgmp_static.a / libgmpxx_static.a but with the mpn .c files whose
+# function the asm pipeline provides filtered out (mpn_no_asm_overlap
+# instead of mpn).  Intended to be linked alongside libgmp_asm.a (via
+# --whole-archive) so the executable gets the asm-accelerated impls
+# without duplicate-symbol errors.  Only emitted when the asm pipeline
+# is on -- when it's off there's nothing for them to add over the plain
+# _static variants and they'd just be duplicates.
+if (gmp_asm_enabled) {
+  static_library("libgmp_static_with_asm") {
+    defines = [ "_LIB" ]
+    configs += [ ":gmp_config" ]
+    sources = gmp_core_sources
+    public_deps = gmp_module_deps  # mpn_no_asm_overlap branch
+  }
+
+  static_library("libgmpxx_static_with_asm") {
+    defines = [
+      "_LIB",
+      "__GMP_WITHIN_GMPXX",
+    ]
+    configs += [ ":gmp_config" ]
+    sources = gmpxx_core_sources
+    public_deps = [ ":libgmp_static_with_asm" ]
+  }
+}
+
+# Asm pipeline target.  Drops a static archive at $target_out_dir/libgmp_asm.a
+# containing all mpn functions for which an asm impl was selected by
+# tools/select_mpn_asm.py for the active (cpu, tune).
+if (gmp_asm_enabled) {
+  action("gmp_asm") {
+    script = "tools/build_mpn_asm.py"
+    # Re-run when any of the inputs the script reads change.
+    inputs = [
+      "tools/gen_config_m4.py",
+      "tools/select_mpn_asm.py",
+      "tools/build_mpn_asm_archive.py",
+      "gmp/mpn/asm-defs.m4",
+    ]
+    if (current_cpu == "x64") {
+      inputs += [ "gmp/mpn/x86_64/x86_64-defs.m4" ]
+      if (current_os == "win") {
+        inputs += [ "gmp/mpn/x86_64/dos64.m4" ]
+      }
+    } else {
+      inputs += [ "gmp/mpn/x86/x86-defs.m4" ]
+    }
+    # Every asm file consumed by this build is a dependency.  This is the
+    # precise list resolved by select_mpn_asm.py for the active tune; if
+    # someone edits any of them the action reruns.
+    foreach(_pair, gmp_asm_pairs) {
+      inputs += [ "gmp/${_pair.asm_path}" ]
+    }
+    outputs = [ gmp_asm_archive ]
+    args = [
+      "--cpu", gmp_asm_cpu_str,
+      "--os", gmp_asm_os_str,
+      "--tune", gmp_asm_tune,
+      "--top-srcdir", rebase_path("gmp", root_build_dir),
+      "--out-archive", rebase_path(gmp_asm_archive, root_build_dir),
+      "--m4", gmp_m4,
+      "--as", rebase_path(gmp_as_path, root_build_dir),
+      "--ar", rebase_path(gmp_ar_path, root_build_dir),
+    ]
+  }
+}
+
+source_set("rand") {
+  configs += [ ":gmp_config" ]
+  sources = rand_sources
+}
+
+source_set("mpf") {
+  configs += [ ":gmp_config" ]
+  sources = mpf_sources
+}
+
+
+source_set("mpn") {
+  configs += [ ":gmp_config" ]
+  sources = mpn_full_sources
+}
+
+# Same sources as :mpn, but with the .c files whose function the active
+# asm tune provides filtered out -- avoids duplicate-symbol link errors
+# when libgmp_asm.a goes onto the link line.  Only used by libgmp.dll.
+# When asm is disabled, this target is never declared (libgmp uses :mpn
+# directly via gmp_module_deps).
+if (gmp_asm_enabled) {
+  source_set("mpn_no_asm_overlap") {
+    configs += [ ":gmp_config" ]
+    sources = []
+    foreach(_src, mpn_full_sources) {
+      _keep = true
+      foreach(_drop, gmp_asm_drop_c) {
+        if (_src == _drop) {
+          _keep = false
+        }
+      }
+      if (_keep) {
+        sources += [ _src ]
+      }
+    }
+  }
+}
+
+source_set("mpq") {
+  configs += [ ":gmp_config" ]
+  sources = mpq_sources
+}
+
+source_set("mpz") {
+  configs += [ ":gmp_config" ]
+  sources = mpz_sources
+}
+
+source_set("printf") {
+  configs += [ ":gmp_config" ]
+  sources = printf_sources
+}
+
+source_set("scanf") {
+  configs += [ ":gmp_config" ]
+  sources = scanf_sources
+}
+
+executable("gmp_tests") {
+  if (is_win) {
+    configs -= [
+      "//build/config/win:windowed_subsystem",
+      "//build/config/win:unicode",
+    ]
+    configs += [
+      "//build/config/win:console_subsystem",
+      "//build/config/win:console_unicode",
+    ]
+  }
+  configs += [ ":gmp_test_config" ]
+  defines = [ "__GMP_WITHIN_GMPXX" ]
+  sources = [
+  ]
+  deps = [
+    ":gmp_tests_sources_shared",
+  ]
+}
+
+static_library("gmp_tests_sources_static") {
+  configs += [ ":gmp_test_config" ]
+  defines = [ "_LIB" ]
+  sources = [
+  ]
+  deps = [
+    ":add_ssaaaa",
+    ":sub_ddmmss",
+  ]
+}
+
+shared_library("gmp_tests_sources_shared") {
+  configs += [ ":gmp_test_config" ]
+  defines = [ "__GMP_LIBGMP_DLL" ]
+  sources = [
+  ]
+  deps = [
+    ":add_ssaaaa",
+    ":sub_ddmmss",
+  ]
+}
+
+source_set("add_ssaaaa") {
+  configs += [ ":gmp_test_config" ]
+  defines = [ "main=devel_test_add_ssaaaa_main", ]
+  sources = [
+  ]
+}
+
+source_set("sub_ddmmss") {
+  configs += [ ":gmp_test_config" ]
+  defines = [ "main=devel_test_sub_ddmmss_main", ]
+  sources = [
+  ]
+}
+
+config("gmp_test_config") {
+  defines = [
+    "_CRT_NONSTDC_NO_DEPRECATE",
+    "_CRT_SECURE_NO_WARNINGS",
+    "__GMP_WITHIN_GMP",
+  ]
+  if (target_os == "win") {
+    defines += [
+      "WANT_WINSOCK2",
+    ]
+  }
+  include_dirs = [
+    "gmp",
+    "gmp/tests",
+    "missing",
+  ]
+  cflags_c = [ "-Wno-implicit-function-declaration" ]
+  cflags = [
+    "-Wno-constant-conversion",
+    "-Wno-tautological-constant-out-of-range-compare",
+    "-Wno-return-type",
+    "-Wno-visibility",
+    "-Wno-format",
+  ]
+  ldflags = [
+  ]
+}
+
+assert(current_cpu != "arm64", "GMP GN/Ninja only supported on x86 and x64!")

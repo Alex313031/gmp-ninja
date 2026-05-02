@@ -1,0 +1,75 @@
+# Pi benchmark on Windows: one .exe per (static, shared) link variant.
+# Both compute pi to 1000 digits via Chudnovsky and report elapsed time
+# in microseconds.  Build under different SIMD args (use_sse2 only vs.
+# use_avx2=true) to see the asm-tune dispatch in action.
+
+import("//src/gmp-ninja/asm.gni")
+
+executable("test_gmp_win32_static") {
+  configs -= [
+    "//build/config/win:windowed_subsystem",
+    "//build/config/win:unicode",
+  ]
+  configs += [
+    "//build/config/win:console_subsystem",
+    "//build/config/win:console_unicode",
+    ":gmp_win32_static_config",
+  ]
+  sources = [ "gmp_win32_static.cc" ]
+  deps = [ "//src/gmp-ninja/testapp/pi:pi_chudnovsky" ]
+  if (gmp_asm_enabled) {
+    # _with_asm variants drop the generic-C versions of the asm-provided
+    # functions, leaving the asm impls (pulled in via the ldflags below)
+    # to satisfy those references without colliding.
+    deps += [
+      "//src/gmp-ninja:libgmpxx_static_with_asm",
+      "//src/gmp-ninja:gmp_asm",
+    ]
+  } else {
+    deps += [
+      "//src/gmp-ninja:libgmp_static",
+      "//src/gmp-ninja:libgmpxx_static",
+    ]
+  }
+}
+
+executable("test_gmp_win32_shared") {
+  configs -= [
+    "//build/config/win:windowed_subsystem",
+    "//build/config/win:unicode",
+  ]
+  configs += [
+    "//build/config/win:console_subsystem",
+    "//build/config/win:console_unicode",
+    ":gmp_win32_shared_config",
+  ]
+  sources = [ "gmp_win32_shared.cc" ]
+  deps = [
+    "//src/gmp-ninja:libgmp",
+    "//src/gmp-ninja:libgmpxx",
+    "//src/gmp-ninja/testapp/pi:pi_chudnovsky",
+  ]
+}
+
+config("gmp_win32_static_config") {
+  ldflags = []
+  if (gmp_asm_enabled) {
+    # libgmp_static.a is pure-C; pull in libgmp_asm.a separately so the
+    # static benchmark exercises the same asm impls as the shared one.
+    # --whole-archive forces inclusion regardless of link order (ar
+    # archives use lazy resolution; without --whole-archive the .a would
+    # be discarded before its symbols are demanded by the source_set
+    # objects coming after it on the link line).
+    ldflags += [
+      "-Wl,--whole-archive",
+      rebase_path(gmp_asm_archive, root_build_dir),
+      "-Wl,--no-whole-archive",
+    ]
+  }
+}
+
+config("gmp_win32_shared_config") {
+  # No rpath equivalent needed on Windows -- the loader searches the
+  # app's directory first, so libgmp.dll / libgmpxx.dll dropped beside
+  # the .exe are picked up automatically.
+}

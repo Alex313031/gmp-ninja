@@ -1,0 +1,155 @@
+# Asm pipeline configuration for the gmp-ninja build.
+#
+# Imported by BUILD.gn.  Computes which mpn functions get asm
+# implementations for the active target and exports:
+#
+#   gmp_asm_enabled    : true if the asm pipeline is running.
+#   gmp_asm_tune       : the resolved tune leaf (e.g. "haswell").
+#   gmp_asm_pairs      : list of {function, asm_path, op} from
+#                        tools/select_mpn_asm.py.
+#   gmp_asm_drop_c     : list of mpn/generic/*.c files to omit from
+#                        the C compilation (asm replaces them).
+#   gmp_asm_archive    : path to the produced libgmp_asm.a.
+#   gmp_asm_cpu_str    : "x64" or "x86" (for select_mpn_asm.py --cpu).
+#   gmp_asm_os_str     : "win" or "linux" (for gen_config_m4.py --os).
+#   gmp_as_path        : assembler binary.
+#   gmp_ar_path        : ar binary.
+#
+# Names are intentionally non-underscore-prefixed -- GN's import()
+# scoping treats `_foo` as file-private, so consumers wouldn't see them.
+#
+# Tune dispatch:
+#
+#   user-set gmp_x64_tune / gmp_x86_tune wins outright.  Otherwise, x64
+#   tunes are picked from SIMD args (use_avx2 -> haswell, etc.) so the
+#   asm impl matches what the C compiler will already be allowed to emit.
+#   The default x64 tune is "generic" (k8/k10 baseline -- runs on every
+#   x86_64 chip back to 2003 and is the right default for Win2000-era
+#   compatibility).  Override with -Dgmp_x64_tune=zen, =skylake, etc.
+#   Run `python3 tools/select_mpn_asm.py --list-tunes` for the full list.
+
+import("//build/config/simd.gni")
+
+declare_args() {
+  # Master toggle.  When false, the build is pure C -- no m4, no asm.
+  # Useful for bootstrapping new targets, debugging, or producing a
+  # maximally-portable libgmp_static.a.
+  gmp_use_asm = (current_cpu == "x86" || current_cpu == "x64")
+
+  # Override the x86_64 CPU tune.  Default = "" -> derive from SIMD args.
+  # Recognised values include: generic (baseline k8/k10), core2, nehalem,
+  # sandybridge, haswell, broadwell, skylake, icelake, alderlake,
+  # zen, zen2, zen3, atom, silvermont, goldmont, ...
+  gmp_x64_tune = ""
+
+  # Override the x86 CPU tune.  Default = "i686" (P6/Pentium-Pro baseline).
+  gmp_x86_tune = "i686"
+
+  # The assembler binary to invoke for asm files.  Same toolchain as the
+  # C compiler -- if you target i686 mingw, this should be the matching
+  # i686-w64-mingw32-as.  Empty -> derive from current_cpu/current_os.
+  gmp_as = ""
+  gmp_ar = ""
+
+  # m4 binary.  Linux/Mac: usually `m4` on PATH.  Windows: install via
+  # MSYS2/GnuWin32 and put on PATH, or override here with a full path.
+  gmp_m4 = "m4"
+}
+
+if (gmp_use_asm && (current_cpu == "x86" || current_cpu == "x64")) {
+  gmp_asm_enabled = true
+
+  # Where the asm archive lands.  Fixed under root_out_dir so both the
+  # gmp_asm action's outputs and libgmp's libs= line agree on the path
+  # without referencing target-scoped vars.  Sibling files (config.m4,
+  # the resolved JSON pair list, intermediate asm_objs/) live alongside
+  # for inspection.
+  gmp_asm_archive = "$root_out_dir/libgmp_asm.a"
+
+  # Resolve the tune.  User-set wins; otherwise derive from SIMD args.
+  if (current_cpu == "x64") {
+    if (gmp_x64_tune != "") {
+      gmp_asm_tune = gmp_x64_tune
+    } else if (use_avx512) {
+      gmp_asm_tune = "skylake"
+    } else if (use_avx2 || use_fma) {
+      gmp_asm_tune = "haswell"
+    } else if (use_avx) {
+      gmp_asm_tune = "sandybridge"
+    } else if (use_sse42) {
+      gmp_asm_tune = "nehalem"
+    } else if (use_sse41) {
+      gmp_asm_tune = "core2"
+    } else {
+      gmp_asm_tune = "generic"
+    }
+  } else {
+    # x86: SIMD args also work but x86 fallbacks are less interesting.
+    if (gmp_x86_tune != "") {
+      gmp_asm_tune = gmp_x86_tune
+    } else if (use_sse41) {
+      gmp_asm_tune = "core2"
+    } else if (use_sse2) {
+      gmp_asm_tune = "pentium4"
+    } else {
+      gmp_asm_tune = "i686"
+    }
+  }
+
+  # Resolve toolchain bins.  Default to the project's MinGW cross dirs.
+  if (gmp_as == "") {
+    if (current_os == "win") {
+      if (current_cpu == "x64") {
+        gmp_as_path = "//tools/mingw/linux/x64/bin/x86_64-w64-mingw32-as"
+        gmp_ar_path = "//tools/mingw/linux/x64/bin/x86_64-w64-mingw32-ar"
+      } else {
+        gmp_as_path = "//tools/mingw/linux/i686/bin/i686-w64-mingw32-as"
+        gmp_ar_path = "//tools/mingw/linux/i686/bin/i686-w64-mingw32-ar"
+      }
+    } else {
+      gmp_as_path = "as"
+      gmp_ar_path = "ar"
+    }
+  } else {
+    gmp_as_path = gmp_as
+    gmp_ar_path = gmp_ar
+  }
+
+  # Resolve the (cpu, os) -> select_mpn_asm.py args.
+  if (current_cpu == "x64") {
+    gmp_asm_cpu_str = "x64"
+  } else {
+    gmp_asm_cpu_str = "x86"
+  }
+  if (current_os == "win") {
+    gmp_asm_os_str = "win"
+  } else {
+    gmp_asm_os_str = "linux"
+  }
+
+  # Run select_mpn_asm.py at gn-gen time to obtain the asm/drop_c lists.
+  # Paths here are relative to the BUILD.gn that imported this .gni
+  # (i.e., src/gmp-ninja/BUILD.gn).
+  _select = exec_script("tools/select_mpn_asm.py",
+                        [
+                          "--gmp-srcdir",
+                          rebase_path("gmp", root_build_dir),
+                          "--cpu",
+                          gmp_asm_cpu_str,
+                          "--tune",
+                          gmp_asm_tune,
+                        ],
+                        "json")
+  gmp_asm_pairs = _select.asm
+  gmp_asm_drop_c = _select.drop_c
+} else {
+  gmp_asm_enabled = false
+  gmp_asm_tune = "off"
+  gmp_asm_pairs = []
+  gmp_asm_drop_c = []
+  gmp_asm_archive = ""
+  gmp_asm_cpu_str = ""
+  gmp_asm_os_str = ""
+  gmp_as_path = ""
+  gmp_ar_path = ""
+}
