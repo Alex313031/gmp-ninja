@@ -1,9 +1,8 @@
 group("gmp_testapps") {
-  public_deps = []
   if (is_win) {
-    public_deps += [ ":test_gmp_win", ]
+    deps = [ ":test_gmp_win", ]
   } else if (is_linux) {
-    public_deps += [ ":test_gmp_linux", ]
+    deps = [ ":test_gmp_linux", ]
   } else {
     print("GMP Test App not supported on target OS")
     print("")
@@ -11,15 +10,19 @@ group("gmp_testapps") {
 }
 
 group("test_gmp_win") {
-  deps = [
-    "win:test_gmp_win32_static",
-    "win:test_gmp_win32_shared",
-  ]
+  if (is_win) {
+    deps = [
+      "win:test_gmp_win32_static",
+      "win:test_gmp_win32_shared",
+    ]
+  }
 }
 
 group("test_gmp_linux") {
-  deps = [
-    "linux:test_gmp_linux_static",
-    "linux:test_gmp_linux_shared",
-  ]
+  if (is_linux) {
+    deps = [
+      "linux:test_gmp_linux_static",
+      "linux:test_gmp_linux_shared",
+    ]
+  }
 }

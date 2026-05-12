@@ -34,6 +34,7 @@ group("gmp_test") {
   # rejects with "undefined reference to WinMain@16".  Re-enable when
   # someone fills in their `sources = []` lists from gmp/tests/.
   deps = [ "testapp:gmp_testapps" ]
+  #deps += [ ":gmp_tests" ]
 }
 
 config("gmp_config") {

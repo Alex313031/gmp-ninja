@@ -53,6 +53,7 @@ executable("test_gmp_win32_shared") {
 
 config("gmp_win32_static_config") {
   ldflags = []
+  configs = [ "//build/config/win:console_unicode", ]
   if (gmp_asm_enabled) {
     # libgmp_static.a is pure-C; pull in libgmp_asm.a separately so the
     # static benchmark exercises the same asm impls as the shared one.
@@ -72,4 +73,5 @@ config("gmp_win32_shared_config") {
   # No rpath equivalent needed on Windows -- the loader searches the
   # app's directory first, so libgmp.dll / libgmpxx.dll dropped beside
   # the .exe are picked up automatically.
+  configs = [ "//build/config/win:console_unicode", ]
 }
