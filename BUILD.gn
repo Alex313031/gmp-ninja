@@ -73,6 +73,12 @@ source_set("gmp_headers") {
   ]
 }
 
+config("gmp_public_config") {
+  include_dirs = [
+    "./",
+  ]
+}
+
 # Sources that go directly into libgmp -- gmp_toplevel_sources comes from
 # the auto-generated gmp_sources.gni (mirrors libgmp_la_SOURCES from
 # Makefile.am); we add the ABI-specific generated tables and the
