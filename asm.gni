@@ -28,7 +28,7 @@
 #   compatibility).  Override with -Dgmp_x64_tune=zen, =skylake, etc.
 #   Run `python3 tools/select_mpn_asm.py --list-tunes` for the full list.
 
-import("//build/config/simd.gni")
+import("//build/config/simd/simd.gni")
 
 declare_args() {
   # Master toggle.  When false, the build is pure C -- no m4, no asm.
